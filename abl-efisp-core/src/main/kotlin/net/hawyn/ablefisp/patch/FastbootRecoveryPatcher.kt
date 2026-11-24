@@ -141,10 +141,9 @@ internal object FastbootRecoveryPatcher {
                 code.branch(rx + FastbootRecoveryModule.REQUEST_OFFSET)
             }
             val manualAuth = facts.continueFlow.authCallRva
-            val manualBoot = facts.continueFlow.bootLinuxCallRva
             fun replay(pc: Long) {
                 val original=image.word(pc)?:fail("原指令")
-                if (pc == manualAuth || pc == manualBoot) {
+                if (pc == manualAuth) {
                     code.replay(pc, original)
                     code.branch(pc + 4)
                     return
@@ -299,7 +298,7 @@ internal object FastbootRecoveryPatcher {
                 A64.branch(pc, rx + FastbootRecoveryModule.AUTH_OFFSET) or 0x80000000.toInt()) }
             val linuxCalls = image.instructions().filter { (pc,w) -> A64.blTarget(pc,w) == facts.continueFlow.bootLinuxTargetRva }.toList()
             if (linuxCalls.none { it.first == facts.continueFlow.bootLinuxCallRva }) fail("原生 BootLinux 调用")
-            linuxCalls.filter { it.first != manualBoot && it.first !in displacedWrappedCalls }.forEach { (pc,_) -> word("内核交接前清除故障计数", pc,
+            linuxCalls.filter { it.first !in displacedWrappedCalls }.forEach { (pc,_) -> word("内核交接前清除故障计数", pc,
                 A64.branch(pc, rx + FastbootRecoveryModule.BOOTLINUX_OFFSET) or 0x80000000.toInt()) }
 
             failures.sites.distinctBy { it.existingPolicyStubRva ?: it.hookRva }.forEach { site ->
@@ -347,11 +346,14 @@ internal object FastbootRecoveryPatcher {
             }
 
             // The manual handler owns auth, FAIL, OKAY, teardown and BootLinux.
-            // Only an early-recovery Continue needs the missing native inputs.
+            // An explicit Continue is a user decision: clear the persistent
+            // failure count at the command entry, before native auth, so even a
+            // later auth/BootLinux failure does not leave the counter stuck.
+            val prepare = manualAuth - 4
             if (continueBoard != null) {
-                val prepare = manualAuth - 4
-                hook("手动 continue 补齐原生板型与平台上下文", prepare) {
+                hook("手动 continue 入口清零并补齐原生板型与平台上下文", prepare) {
                     save()
+                    branch(rx + FastbootRecoveryModule.CLEAR_COUNTER_OFFSET, true)
                     branch(rx + FastbootRecoveryModule.FORCED_OFFSET, true)
                     val ordinary = placeholder()
                     continueBoardInit(continueBoard)
@@ -363,6 +365,13 @@ internal object FastbootRecoveryPatcher {
                     val native = pc
                     replace(ordinary, cbz(ordinary, native, 0))
                     replace(initialized, cbz(initialized, native, 0))
+                    restore()
+                    replay(prepare)
+                }
+            } else {
+                hook("手动 continue 入口清除故障计数", prepare) {
+                    save()
+                    branch(rx + FastbootRecoveryModule.CLEAR_COUNTER_OFFSET, true)
                     restore()
                     replay(prepare)
                 }
@@ -409,6 +418,7 @@ internal object FastbootRecoveryPatcher {
             "故障恢复使用独立 RX/RW 小模块及原始入口栈；KBL 仍由显式命令启动。",
             "连续阻断故障达到 3 次优先进入 Fastboot；私有 EFI 计数服务不可用时保留 RAM 恢复。",
             "手动 continue 使用原生认证、内核交接与清理；仅在已证明的故障入口补齐原生板型与平台上下文。",
+            "手动 continue 入口即清零持久故障计数；正常 BootLinux 交接前也清零，只有 BootLinux 返回失败才累计并触发 3 次保护。",
             "已退出 UEFI Boot Services 后的内核异常不在本恢复模块可直接接管的范围内。",
         ), linkedMapOf("rxRva" to layout.rx.rva,"stateRva" to layout.rw.rva,"moduleSha256" to FastbootRecoveryModule.SHA256,
             "checkpointRva" to checkpointMetadata(facts),"hookCount" to finalChanges.size,
@@ -477,6 +487,12 @@ internal object FastbootRecoveryPatcher {
                 emit(opcode or ((offset / size) shl 10) or (base shl 5) or reg)
             }
             fun call(reg: Int) = emit(0xd63f0000.toInt() or (reg shl 5))
+            fun argument(reg: Int, arg: ContinueBoardInitFacts.Repro) {
+                when (arg) {
+                    is ContinueBoardInitFacts.Repro.Const -> immediate(reg, arg.value)
+                    is ContinueBoardInitFacts.Repro.Addr -> address(reg, arg.rva)
+                }
+            }
             fun protocol(spec: ContinueBoardInitFacts.Protocol) {
                 // save() leaves two aligned scratch words after the saved flags.
                 scalar(false, 31, 256)
@@ -496,6 +512,7 @@ internal object FastbootRecoveryPatcher {
                     load(16, 8, offset)
                     missing += placeholder() to 16
                     emit(0xaa1f03e0.toInt()) // The original probe consumes the zero LocateProtocol status.
+                    spec.probeArgs.forEach { (reg, arg) -> argument(reg, arg) }
                     call(16)
                     errors += placeholder()
                 }
@@ -504,6 +521,7 @@ internal object FastbootRecoveryPatcher {
                 load(16, 0, spec.getterOffset)
                 missing += placeholder() to 16
                 address(1, spec.outputRva)
+                spec.getterArgs.forEach { (reg, arg) -> argument(reg, arg) }
                 call(16)
                 errors += placeholder()
             }

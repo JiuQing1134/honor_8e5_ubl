@@ -92,6 +92,18 @@ void br_before_bootlinux(BRState *s, const BRConfig *c) {
      */
     if (s->failures) write_counter(s, 0);
 }
+void br_clear_counter_state(BRState *s, const BRConfig *c) {
+    (void)c;
+    /* An explicit Fastboot `continue` is a user decision: reset the persistent
+     * boot-failure count and the RAM force state at the command entry, before
+     * native auth. A successful normal BootLinux still clears before handoff;
+     * a returned BootLinux restores its RAM count and counts the failure.
+     */
+    s->force = 0;
+    s->failures = 0;
+    s->nv_requested_count = UINT64_MAX;
+    write_counter(s, 0);
+}
 void br_prepare_retry(BRState *s, const BRConfig *c) {
     s->manual_depth = 0;
     s->boot_scope = 1;

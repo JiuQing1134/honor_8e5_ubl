@@ -2,7 +2,15 @@ package net.hawyn.ablefisp.patch
 
 /** Discovers only the native platform context omitted by an early Fastboot entry. */
 internal object ContinueBoardInitFacts {
-    data class Protocol(val guidRva: Long, val outputRva: Long, val getterOffset: Int, val probeOffset: Int? = null)
+    sealed class Repro {
+        data class Const(val value: Long) : Repro()
+        data class Addr(val rva: Long) : Repro()
+    }
+    data class Protocol(
+        val guidRva: Long, val outputRva: Long, val getterOffset: Int, val probeOffset: Int? = null,
+        val probeArgs: List<Pair<Int, Repro>> = emptyList(),
+        val getterArgs: List<Pair<Int, Repro>> = emptyList(),
+    )
     data class Copy(val sourceRva: Long, val destRva: Long, val size: Int)
     data class Plan(
         val bootServicesRva: Long,
@@ -16,7 +24,7 @@ internal object ContinueBoardInitFacts {
 
     private data class Mem(val reg: Int, val base: Int, val offset: Int, val size: Int, val load: Boolean)
     private data class Locate(val guid: Long, val stackSlot: Int, val offset: Int)
-    private data class Getter(val output: Long, val offset: Int, val gate: Long)
+    private data class Getter(val output: Long, val offset: Int, val gate: Long, val args: List<Pair<Int, Repro>>)
     private data class Validation(val shift: Int, val limit: Int, val copyStart: Long)
 
     fun analyze(image: PeImage, facts: FastbootRecoveryFacts.Facts): Plan {
@@ -50,6 +58,7 @@ internal object ContinueBoardInitFacts {
         }
 
         val boardProbe = firstIndirect(image, boardProbeStart)
+        val boardProbeArgs = callArgs(A64.argumentState(image, boardProbeStart, boardProbe).registers, setOf(0))
         val probeMethod = objectMethod(image, boardProbeStart, boardProbe, boardLocate.stackSlot, false)
         if (!StraightLineLiveness.preserves(image, boardProbeStart, boardProbe, setOf(0)))
             fail("主板协议探测参数")
@@ -76,8 +85,8 @@ internal object ContinueBoardInitFacts {
         val preparedFlow = A64ValueOrigins(image, boardGetterStart, main.end)
         val copies = copies(image, preparedFlow, validation.copyStart, platformLog, board.output, platform.output)
         return Plan(bootServices, boardLocate.offset,
-            Protocol(boardLocate.guid, board.output, board.offset, probeMethod),
-            Protocol(platformLocate.guid, platform.output, platform.offset),
+            Protocol(boardLocate.guid, board.output, board.offset, probeMethod, boardProbeArgs, board.args),
+            Protocol(platformLocate.guid, platform.output, platform.offset, getterArgs = platform.args),
             validation.shift, validation.limit, copies)
     }
 
@@ -109,7 +118,7 @@ internal object ContinueBoardInitFacts {
         val args = A64.argumentState(image, start, call).registers
         val output = (args[1] as? A64.Value.Address)?.rva?.takeIf { image.isWritable(it, 16) }
             ?: fail("主板或平台的原生输出结构")
-        return Getter(output, method, statusGate(image, call))
+        return Getter(output, method, statusGate(image, call), callArgs(args, setOf(0, 1)))
     }
 
     private fun objectMethod(image: PeImage, start: Long, call: Long, slot: Int, takesSelf: Boolean): Int {
@@ -166,6 +175,20 @@ internal object ContinueBoardInitFacts {
             copies.none { it.size == 4 && it.destRva == platform && it.sourceRva == board })
             fail("原生板号与设备树描述复制")
         return copies
+    }
+
+    /** Only constants and static addresses are reproducible in the generated
+     *  manual-continue stub; stack/unknown arguments make the optional board
+     *  initialization fail closed instead of calling the protocol with garbage. */
+    private fun callArgs(registers: Map<Int, A64.Value>, skip: Set<Int>): List<Pair<Int, Repro>> =
+        (0..7).filterNot { it in skip }.map { reg ->
+            reg to reproduce(registers[reg] ?: fail("continue 参数 ABI 未证明：x$reg"))
+        }
+
+    private fun reproduce(value: A64.Value): Repro = when (value) {
+        is A64.Value.Constant -> Repro.Const(value.value)
+        is A64.Value.Address -> Repro.Addr(value.rva)
+        else -> fail("continue 参数 ABI 未证明：$value")
     }
 
     private fun firstIndirect(image: PeImage, from: Long): Long {

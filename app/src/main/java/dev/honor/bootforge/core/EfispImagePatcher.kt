@@ -10,10 +10,8 @@ import java.util.concurrent.CancellationException
 
 /** File-only adapter around the supplied ABL-EFISP engine; never accesses a partition. */
 object EfispImagePatcher {
-    const val FASTBOOT_TEXT = "device freedom (github hawyn2018)"
-    const val BOOT_WARNING = "your device has been unlocked and now freedom\n" +
-        "unlocktool opensource address\n" +
-        "https://github.com/hawyn2018/honor_8e5_ubl"
+    const val FASTBOOT_TEXT = "You Are Free"
+    const val BOOT_WARNING = "You Are Free"
 
     data class Result(
         val bytes: Long,

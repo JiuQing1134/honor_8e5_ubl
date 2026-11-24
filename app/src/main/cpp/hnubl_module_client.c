@@ -16,9 +16,9 @@
 enum { EXIT_UNKNOWN = 125, EXIT_NOT_SUBMITTED = 126 };
 enum { FRAME_STDOUT = 1, FRAME_STDERR = 2, FRAME_EXIT = 3,
        FRAME_ERROR = 4, FRAME_STARTED = 16 };
-static const unsigned char auth_magic[8] = "HNUBLRA1";
-static const unsigned char request_magic[8] = "HNUBLRT1";
-static const unsigned char response_magic[8] = "HNUBLRS1";
+static const unsigned char auth_magic[8] = {'H','N','U','B','L','R','A','1'};
+static const unsigned char request_magic[8] = {'H','N','U','B','L','R','T','1'};
+static const unsigned char response_magic[8] = {'H','N','U','B','L','R','S','1'};
 
 static void put_be32(unsigned char out[4], uint32_t value) {
     out[0] = (unsigned char)(value >> 24);

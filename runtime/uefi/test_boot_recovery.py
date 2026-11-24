@@ -445,6 +445,21 @@ def initial_threshold(h):
     assert len(h.counts("Watchdog")) == 1 and not h.counts("Stall") and not h.counts("SetVariable")
 
 
+def clear_counter_entry(h):
+    """The manual continue entry clears the persistent and RAM failure state."""
+    h.run()
+    assert h.state_value("failures") >= 3 and h.state_value("force") == 1
+    assert h.nv_count is not None and h.nv_count >= 3
+    assert not h.counts("SetVariable")
+    h.after_action = lambda m: m.stop("clear-counter-return")
+    h.go("CLEAR_COUNTER", link=h.after)
+    h.u.emu_start(h.module + h.offsets["CLEAR_COUNTER"], 0, count=1000000)
+    assert h.ended == "clear-counter-return"
+    assert h.state_value("failures") == 0 and h.state_value("force") == 0
+    assert h.nv_count == 0
+    assert [event["count"] for event in h.counts("SetVariable")] == [0]
+
+
 def manual_bootlinux_return(h, status):
     """Real module instructions retain the native FASTBOOT -> AUTH -> handoff ABI."""
     arguments = [0xA700000000000000 + index for index in range(8)]
@@ -835,6 +850,7 @@ def main():
         ("manual-error-return-original-caller-performs-native-event-cleanup", {}, lambda h: manual_bootlinux_native_cleanup(h, ERROR | 7)),
         ("manual-error-existing-count-native-cleanup-and-diagnostic", {"nv_count": 3}, lambda h: manual_bootlinux_native_cleanup(h, ERROR | 14)),
         ("high-wide-manual-warning-native-cleanup", {"image_base": 0x190000000, "wide_rva": True, "nv_count": 2}, lambda h: manual_bootlinux_native_cleanup(h, 1)),
+        ("continue-entry-clear-resets-persistent-counter", {"nv_count": 3}, clear_counter_entry),
         ("valid-counter-three-forces-first-entry", {"nv_count": 3}, initial_threshold),
         ("valid-counter-larger-than-threshold-forces-first-entry", {"nv_count": 9}, initial_threshold),
         ("getvariable-absent-allows-healthy-entry", {"get_present": False}, healthy),

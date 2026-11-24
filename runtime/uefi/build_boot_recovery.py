@@ -20,6 +20,7 @@ SYMBOLS = {
     "DEFER": "br_defer", "PENDING": "br_pending", "PENDING_VALUE": "br_pending_value",
     "BOOT_SCOPE": "br_boot_scope", "FASTBOOT_ENTER": "br_fastboot_enter", "AUTH": "br_auth",
     "ORIGINAL_ENTRY": "br_original_entry", "CONFIG": "br_config",
+    "CLEAR_COUNTER": "br_clear_counter",
 }
 
 def run(args):

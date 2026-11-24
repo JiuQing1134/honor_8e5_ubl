@@ -247,6 +247,19 @@ br_bootlinux:
     b br_request
 
 .balign 16
+.global br_clear_counter
+.hidden br_clear_counter
+/* Manual Fastboot continue entry: clear the persistent failure count before
+ * native auth/BootLinux. Called from the patched manual auth site.
+ */
+br_clear_counter:
+    bti c
+    BR_LOCATE
+    mov x0, x16
+    mov x1, x10
+    b br_clear_counter_state
+
+.balign 16
 .global br_set_active
 .hidden br_set_active
 br_set_active:
