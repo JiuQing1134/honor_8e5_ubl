@@ -56,6 +56,13 @@
 
 这份列表仅用于展示，应用没有按型号设置硬性准入限制。相同处理器也可能具有不同的签名启动链、设备计数、固件接口和系统兼容条件；列表中的名称不构成对所有系统版本的兼容保证。使用前请确认当前设备、镜像和系统组合的适用性。
 
+> **本 fork 的 AAP-AN00 102 补丁（2026-11-24）**：在 3.1.4 基础上合入
+> P0-1 / P1-1。手动 `continue` 重新纳入 `BOOTLINUX_OFFSET` wrapper，经过
+> `br_before_bootlinux` 清零 `HnublEfispBootFailures`；`ContinueBoardInitFacts`
+> 的 x1–x7 只接受可重放的常量/静态地址，无法唯一证明时 fail-closed 跳过可选的
+> continue 板型初始化，避免 `BOOTLOADER_CRASH`。实机：HONOR AAP-AN00，
+> MagicOS 10.0.0.102（Android 16），本机原厂 ABL。
+
 假回锁是基于 EFISP 的引导策略。Fastboot 显示、镜像接受行为与厂商官方解锁凭据是不同层面的状态，请勿仅凭某一处 `locked` / `unlocked` 显示判断全部启动链状态。
 
 ### 使用流程
